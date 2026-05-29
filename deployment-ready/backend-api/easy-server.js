@@ -491,17 +491,21 @@ async function notifyTeam(event, registration, buildMessage, action) {
     };
 
     if (!mailConfigReady()) {
+      console.warn(`[mail:${action}] SMTP is not configured; saving email for ${member.email} to ${path.basename(MAIL_LOG_FILE)}.`);
       appendMailLog({ ...entry, status: 'logged', reason: 'SMTP credentials are not configured in .env' });
       results.push({ to: member.email, status: 'logged' });
       continue;
     }
 
     try {
+      console.log(`[mail:${action}] Sending email to ${member.email}...`);
       await sendSmtpMail({ to: member.email, ...message });
       appendMailLog({ ...entry, status: 'sent' });
+      console.log(`[mail:${action}] Email sent to ${member.email}.`);
       results.push({ to: member.email, status: 'sent' });
     } catch (error) {
       appendMailLog({ ...entry, status: 'failed', error: error.message });
+      console.error(`[mail:${action}] Failed to send email to ${member.email}: ${error.message}`);
       results.push({ to: member.email, status: 'failed', error: error.message });
     }
   }
