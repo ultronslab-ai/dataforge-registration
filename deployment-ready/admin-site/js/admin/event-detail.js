@@ -270,10 +270,12 @@ document.addEventListener('DOMContentLoaded', async () => {
       const sentCount = emailStatuses.filter(item => item.status === 'sent').length;
       const loggedCount = emailStatuses.filter(item => item.status === 'logged').length;
       const failedCount = emailStatuses.filter(item => item.status === 'failed').length;
+      const firstEmailError = emailStatuses.find(item => item.status === 'failed' && item.error)?.error;
       let message = 'Team registration deleted successfully.';
       if (sentCount > 0) message += ` Cancellation email sent to ${sentCount} team member(s).`;
       if (loggedCount > 0) message += ` Email content saved to easy-mail-log.json for ${loggedCount} team member(s).`;
       if (failedCount > 0) message += ` ${failedCount} cancellation email(s) failed to send.`;
+      if (firstEmailError) message += ` Error: ${firstEmailError}`;
       alert(message);
       loadStats();
       loadRegistrants();
@@ -301,10 +303,12 @@ document.addEventListener('DOMContentLoaded', async () => {
       const sentCount = emailStatuses.filter(item => item.status === 'sent').length;
       const loggedCount = emailStatuses.filter(item => item.status === 'logged').length;
       const failedCount = emailStatuses.filter(item => item.status === 'failed').length;
+      const firstEmailError = emailStatuses.find(item => item.status === 'failed' && item.error)?.error;
       let message = 'Registration verified successfully.';
       if (sentCount > 0) message += ` Verification email sent to ${sentCount} team member(s).`;
       if (loggedCount > 0) message += ` Email content saved to easy-mail-log.json for ${loggedCount} team member(s).`;
       if (failedCount > 0) message += ` ${failedCount} email(s) failed to send.`;
+      if (firstEmailError) message += ` Error: ${firstEmailError}`;
       alert(message);
       closeModal();
       loadStats();
@@ -342,7 +346,17 @@ document.addEventListener('DOMContentLoaded', async () => {
       const data = await res.json();
       if (!res.ok) throw new Error(data.message || 'Rejection failed.');
 
-      alert('Registration rejected. Notice dispatched.');
+      const emailStatuses = data.email || [];
+      const sentCount = emailStatuses.filter(item => item.status === 'sent').length;
+      const loggedCount = emailStatuses.filter(item => item.status === 'logged').length;
+      const failedCount = emailStatuses.filter(item => item.status === 'failed').length;
+      const firstEmailError = emailStatuses.find(item => item.status === 'failed' && item.error)?.error;
+      let message = 'Registration rejected.';
+      if (sentCount > 0) message += ` Notice email sent to ${sentCount} team member(s).`;
+      if (loggedCount > 0) message += ` Email content saved to easy-mail-log.json for ${loggedCount} team member(s).`;
+      if (failedCount > 0) message += ` ${failedCount} notice email(s) failed to send.`;
+      if (firstEmailError) message += ` Error: ${firstEmailError}`;
+      alert(message);
       closeModal();
       loadStats();
       loadRegistrants();
