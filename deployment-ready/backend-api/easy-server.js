@@ -4,6 +4,12 @@ const path = require('path');
 const crypto = require('crypto');
 const net = require('net');
 const tls = require('tls');
+let nodemailer = null;
+try {
+  nodemailer = require('nodemailer');
+} catch (error) {
+  nodemailer = null;
+}
 
 const PORT = Number(process.env.PORT || 4000);
 const ROOT = __dirname;
@@ -41,6 +47,7 @@ function loadEnv() {
 }
 
 const ENV = { ...loadEnv(), ...process.env };
+const SMTP_TIMEOUT_MS = Number(ENV.SMTP_TIMEOUT_MS || 15000);
 
 function seedData() {
   return {
@@ -328,17 +335,29 @@ function appendMailLog(entry) {
 function smtpRead(socket) {
   return new Promise((resolve, reject) => {
     let buffer = '';
+    let settled = false;
+    const finish = (fn, value) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      socket.off('data', onData);
+      socket.off('error', onError);
+      fn(value);
+    };
+    const onError = error => finish(reject, error);
+    const timer = setTimeout(() => {
+      finish(reject, new Error(`SMTP timed out while waiting for server response after ${SMTP_TIMEOUT_MS}ms`));
+    }, SMTP_TIMEOUT_MS);
     const onData = chunk => {
       buffer += chunk.toString('utf8');
       const lines = buffer.split(/\r?\n/).filter(Boolean);
       const last = lines[lines.length - 1] || '';
       if (/^\d{3} /.test(last)) {
-        socket.off('data', onData);
-        resolve(buffer);
+        finish(resolve, buffer);
       }
     };
     socket.on('data', onData);
-    socket.once('error', reject);
+    socket.once('error', onError);
   });
 }
 
@@ -354,16 +373,43 @@ async function smtpCommand(socket, command, expected) {
 function connectSmtp(host, port, secure) {
   return new Promise((resolve, reject) => {
     const socket = secure ? tls.connect(port, host, { servername: host }) : net.connect(port, host);
-    socket.once('connect', () => resolve(socket));
-    socket.once('secureConnect', () => resolve(socket));
-    socket.once('error', reject);
+    let settled = false;
+    const finish = (fn, value) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      socket.off('connect', onConnect);
+      socket.off('secureConnect', onSecureConnect);
+      socket.off('error', onError);
+      fn(value);
+    };
+    const onConnect = () => {
+      if (!secure) finish(resolve, socket);
+    };
+    const onSecureConnect = () => finish(resolve, socket);
+    const onError = error => finish(reject, error);
+    const timer = setTimeout(() => {
+      socket.destroy();
+      finish(reject, new Error(`SMTP timed out while connecting to ${host}:${port} after ${SMTP_TIMEOUT_MS}ms`));
+    }, SMTP_TIMEOUT_MS);
+    socket.once('connect', onConnect);
+    socket.once('secureConnect', onSecureConnect);
+    socket.once('error', onError);
   });
 }
 
 function upgradeToTls(socket, host) {
   return new Promise((resolve, reject) => {
     const secureSocket = tls.connect({ socket, servername: host }, () => resolve(secureSocket));
-    secureSocket.once('error', reject);
+    const timer = setTimeout(() => {
+      secureSocket.destroy();
+      reject(new Error(`SMTP timed out while starting TLS after ${SMTP_TIMEOUT_MS}ms`));
+    }, SMTP_TIMEOUT_MS);
+    secureSocket.once('secureConnect', () => clearTimeout(timer));
+    secureSocket.once('error', error => {
+      clearTimeout(timer);
+      reject(error);
+    });
   });
 }
 
@@ -372,6 +418,31 @@ async function sendSmtpMail({ to, subject, text }) {
   const port = Number(ENV.SMTP_PORT || 587);
   const secure = ENV.SMTP_SECURE === 'true' || port === 465;
   const from = ENV.SMTP_USER;
+
+  if (nodemailer) {
+    const transporter = nodemailer.createTransport({
+      host,
+      port,
+      secure,
+      auth: {
+        user: from,
+        pass: ENV.SMTP_PASS
+      },
+      connectionTimeout: SMTP_TIMEOUT_MS,
+      greetingTimeout: SMTP_TIMEOUT_MS,
+      socketTimeout: SMTP_TIMEOUT_MS,
+      tls: { servername: host }
+    });
+
+    await transporter.sendMail({
+      from: `"${ENV.CLUB_NAME || 'DataForge'}" <${from}>`,
+      to,
+      subject,
+      text
+    });
+    return;
+  }
+
   let socket = await connectSmtp(host, port, secure);
 
   try {
